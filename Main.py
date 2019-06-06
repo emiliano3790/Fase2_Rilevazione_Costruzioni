@@ -31,7 +31,7 @@ if not os.path.exists(os.getcwd() + '/' + output_dir):
 
 # Seleziono i vari geojson che simulano l'area incendiata
 for geojson in os.listdir(os.getcwd() + '/' + input_dir):
-	geojson_name = geojson[:geojson.index(".")] # Prendo il solo nome del file senza estensione: 2_Ex_2005-2011
+	geojson_name = geojson[:geojson.index(".")]  # Prendo il solo nome del file senza estensione: 2_Ex_2005-2011
 	print 'GeoJSON:', geojson_name
 	dest_stack_cropped_dir = os.getcwd() + '/' + output_dir + '/' + geojson_name + '/' + stack_cropped_dir # stack cropped sul geojson
 	excel_statistics_dir = os.getcwd() + '/' + output_dir + '/' + geojson_name + '/' + statistics_dir # Qua salvo le statistiche
@@ -39,7 +39,7 @@ for geojson in os.listdir(os.getcwd() + '/' + input_dir):
 		os.makedirs(dest_stack_cropped_dir)
 	if not os.path.exists(excel_statistics_dir):
 		os.makedirs(excel_statistics_dir)
-	sheet_list, workbook_list = tl.open_stat_files(geojson_name) # Apre i file excel delle statistiche: nome-geojson_nome-stat.xlsx
+	sheet_list, workbook_list = tl.open_stat_files(geojson_name)  # Apre i file excel delle statistiche: nome-geojson_nome-stat.xlsx
 	geojson_path = os.getcwd() + '/' + input_dir + '/' + geojson
 	year_min_lim = geojson[-17:-13]
 	year_sup_lim = geojson[-12:-8]
@@ -49,30 +49,73 @@ for geojson in os.listdir(os.getcwd() + '/' + input_dir):
 		stat_type_row = 1
 		stat_type_col = 0
 		tl.init_excel_file(sheet, stat_type_row, stat_type_col, 'Polygon', year_list, index_name_list)
-		stat_type_col += len(year_list) + 1
+		stat_type_col += len(year_list) + 2
 		tl.init_excel_file(sheet, stat_type_row, stat_type_col, 'Contorno', year_list, index_name_list)
-		stat_type_col += len(year_list) + 1
+		stat_type_col += len(year_list) + 2
 		tl.init_excel_file(sheet, stat_type_row, stat_type_col, 'Differenza', year_list, index_name_list)
-	first_value_row_index = 4
-	first_value_column_index = 1
-	tl.core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, first_value_row_index, first_value_column_index, sheet_list, len(year_list))
+	tl.core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, sheet_list)
 	tl.calc_difference(sheet_list)
 	tl.close_stat_file(workbook_list)
+	# Per spostare i file delle statistiche li rinomino
 	for xlsx_file in glob.glob("*.xlsx"): # Fa la ricerca nella cwd
 		os.rename(os.getcwd() + '/' + xlsx_file, excel_statistics_dir + '/' + xlsx_file)
 
-		# for legend_name in legend_name_list:
-		# 	sheet.write(0, column_legend, geojson_name)
-		# 	sheet.write(1, column_legend, legend_name)
-		# 	row_year = 4
-		# 	for year in year_list:
-		# 		sheet.write(row_year, column_legend, year)
-		# 		row_year = row_year + 1
-		# 	for index_name in index_name_list:
-		# 		sheet.write(3, column_index, index_name)
-		# 		column_index = column_index + 1
-		# 	column_legend = column_legend + 8
-		# 	column_index = column_index + 2
+	# Ora devo creare i grafici
+	for i in range(0, len(sheet_list)):
+		z = 0
+		row_chart = 21
+		for index in index_name_list:
+			chart_diff = workbook_list[i].add_chart({'type': 'line'})
+			chart_pol = workbook_list[i].add_chart({'type': 'line'})
+			chart_int = workbook_list[i].add_chart({'type': 'line'})
+			chart_diff.set_x_axis({'name': 'Year'})
+			chart_diff.set_title({'name': index})  # Intestazione grafico
+			chart_pol.set_x_axis({'name': 'Year'})
+			chart_pol.set_title({'name': index})  # Intestazione grafico
+			chart_int.set_x_axis({'name': 'Year'})
+			chart_int.set_title({'name': index})  # Intestazione grafico
+			string_chart_diff = '=Sheet1!$' + let_list_excel_diff[z] + '$5:$' + let_list_excel_diff[z] + '$19'
+			string_chart_pol = '=Sheet1!$' + let_list_excel_pol[z] + '$5:$' + let_list_excel_pol[z] + '$19'
+			string_chart_int = '=Sheet1!$' + let_list_excel_int[z] + '$5:$' + let_list_excel_int[z] + '$19'
+			# print string_values
+			chart_diff.add_series({
+				'categories': '=Sheet1!$Q$5:$Q$19',
+				'values': string_chart_diff,
+			})
+			chart_pol.add_series({
+				'categories': '=Sheet1!$Q$5:$Q$19',
+				'values': string_chart_pol,
+			})
+			chart_int.add_series({
+				'categories': '=Sheet1!$Q$5:$Q$19',
+				'values': string_chart_int,
+			})
+			casel_diff_chart = 'Q' + str(row_chart)
+			sheet_list[i].insert_chart(casel_diff_chart, chart_diff)
+			casel_pol_chart = 'A' + str(row_chart)
+			sheet_list[i].insert_chart(casel_pol_chart, chart_pol)
+			casel_int_chart = 'I' + str(row_chart)
+			sheet_list[i].insert_chart(casel_int_chart, chart_int)
+			row_chart = row_chart + 16
+			z = z + 1
+
+
+
+
+
+
+	# 	for legend_name in legend_name_list:
+	# 		sheet.write(0, column_legend, geojson_name)
+	# 		sheet.write(1, column_legend, legend_name)
+	# 		row_year = 4
+	# 		for year in year_list:
+	# 			sheet.write(row_year, column_legend, year)
+	# 			row_year = row_year + 1
+	# 		for index_name in index_name_list:
+	# 			sheet.write(3, column_index, index_name)
+	# 			column_index = column_index + 1
+	# 		column_legend = column_legend + 8
+	# 		column_index = column_index + 2
 	# first_value_row_index = 2
 	# first_value_column_index = 1
 	# tl.core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, first_value_row_index, first_value_column_index, sheet_list)
@@ -84,40 +127,4 @@ for geojson in os.listdir(os.getcwd() + '/' + input_dir):
 	# 			dest_cell = xl_rowcol_to_cell(row, col + 16)
 	# 			formula = '=ABS(-' + polygon_item + '+' + intorno_item + ')' # Formula: intorno - poligono
 	# 			esito = sheet.write_formula(dest_cell, formula)
-	# for i in range(0, len(sheet_list)):
-	# 	z = 0
-	# 	row_chart = 21
-	# 	for index in index_name_list:
-	# 		chart_diff = workbook_list[i].add_chart({'type': 'line'})
-	# 		chart_pol = workbook_list[i].add_chart({'type': 'line'})
-	# 		chart_int = workbook_list[i].add_chart({'type': 'line'})
-	# 		chart_diff.set_x_axis({'name': 'Year'})
-	# 		chart_diff.set_title({'name': index}) # Intestazione grafico
-	# 		chart_pol.set_x_axis({'name': 'Year'})
-	# 		chart_pol.set_title({'name': index}) # Intestazione grafico
-	# 		chart_int.set_x_axis({'name': 'Year'})
-	# 		chart_int.set_title({'name': index}) # Intestazione grafico
-	# 		string_chart_diff = '=Sheet1!$' + let_list_excel_diff[z] + '$5:$' + let_list_excel_diff[z] + '$19'
-	# 		string_chart_pol = '=Sheet1!$' + let_list_excel_pol[z] + '$5:$' + let_list_excel_pol[z] + '$19'
-	# 		string_chart_int = '=Sheet1!$' + let_list_excel_int[z] + '$5:$' + let_list_excel_int[z] + '$19'
-	# 		# print string_values
-	# 		chart_diff.add_series({
-	# 			'categories': '=Sheet1!$Q$5:$Q$19',
-    # 			'values': string_chart_diff,
-	# 			})
-	# 		chart_pol.add_series({
-	# 			'categories': '=Sheet1!$Q$5:$Q$19',
-    # 			'values': string_chart_pol,
-	# 			})
-	# 		chart_int.add_series({
-	# 			'categories': '=Sheet1!$Q$5:$Q$19',
-    # 			'values': string_chart_int,
-	# 			})
-	# 		casel_diff_chart = 'Q' + str(row_chart)
-	# 		sheet_list[i].insert_chart(casel_diff_chart, chart_diff)
-	# 		casel_pol_chart = 'A' + str(row_chart)
-	# 		sheet_list[i].insert_chart(casel_pol_chart, chart_pol)
-	# 		casel_int_chart = 'I' + str(row_chart)
-	# 		sheet_list[i].insert_chart(casel_int_chart, chart_int)
-	# 		row_chart = row_chart + 16
-	# 		z = z + 1
+

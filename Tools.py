@@ -1,19 +1,18 @@
 # coding=utf-8
 from __future__ import division
 import rasterio
-import os
-import numpy as np
-import json
-import collections
-import xlsxwriter
 from rasterio.mask import mask
-from scipy import stats
+import numpy as np
+import os
+import json
+import xlsxwriter
+from xlsxwriter.utility import xl_rowcol_to_cell
 from random import randint
 
 cloud_dir = 'cloud_mosaic'
 
-min_dist = 20 # distanza minima dal poligono per cui cerco i pixel di contorno. Provare con 20/15
-max_dist = 50 # distanza massima dal poligono per cui cerco i pixel di contorno. Provare con 60/70
+min_dist = 20  # distanza minima dal poligono per cui cerco i pixel di contorno. Provare con 20/15
+max_dist = 50  # distanza massima dal poligono per cui cerco i pixel di contorno. Provare con 60/70
 
 LS7_list = ['2012', '2013', '2014', '2015', '2016', '2017', '2018']
 stat_name_list = ['mean', 'min', 'max', 'devstd', 'var', 'perc25', 'perc50', 'perc75', 'perc98']
@@ -29,6 +28,7 @@ def open_stat_files(geojson_name):
         sheet_list.append(sheet)
         workbook_list.append(workbook)
     return sheet_list, workbook_list
+
 
 # Inizializza la struttura dei file excel. 3 blocchi uguali: polygon, contorno e differenza
 def init_excel_file(sheet, stat_type_row, stat_type_col, stat_type, year_list, index_list):
@@ -53,7 +53,6 @@ def get_polygon(geojson_path):
     geojson = open(geojson_path, 'r').read()
     readable_json = json.loads(geojson)
     polygon = []
-    temp = readable_json['features'][0]['geometry']
     polygon.append(readable_json['features'][0]['geometry'])
     return polygon
     # Il file GeoJSON va chiuso?
@@ -134,18 +133,18 @@ def calculate_stats(green_array, red_array, NIR_array, SWIR1_array, SWIR2_array,
 
 
 def cloud_check(rand_row_index, rand_col_index):
-	LS5_LS7_cloud_value_list = [2, 4, 8, 16]
+    LS5_LS7_cloud_value_list = [2, 4, 8, 16]
     LS8_cloud_value_list = [352, 368, 416, 432, 480, 864, 880, 928, 944, 992, # Cloud
                             328, 392, 840, 904, 1350, # Cloud shadow
                             336, 368, 400, 432, 848, 880, 912, 944, 1352, # Snow/Ice
                             480, 992, # High confidence cloud
                             322, 324, 328, 336, 352, 368, 386, 388, 392, 400, 416, 432, 480, # Low confidence cirrus
                             834, 836, 840, 848, 864, 880, 898, 900, 904, 912, 928, 944, 992] # High confidence cirrus
-    cloud_pixel = False # È la variabile che viene restituita dalla funzione e che mi permette di capire se il pixel è coperto da nuvole o meno
+    cloud_pixel = False  # È la variabile che viene restituita dalla funzione e che mi permette di capire se il pixel è coperto da nuvole o meno
     temp_cond = True
     for cloud_tif in os.listdir(os.getcwd() + '/' + cloud_dir):
         cloud_dataset = rasterio.open(os.getcwd() + '/' + cloud_dir + '/' + cloud_tif, 'r')
-        cloud_array = cloud_dataset.read(1, masked = True)
+        cloud_array = cloud_dataset.read(1, masked=True)
         if 'LS5' or 'LS7' in cloud_tif: # Mi serve una regola per capire con che tipo di cloud mosaic sto lavorando
             for cloud_value in LS5_LS7_cloud_value_list:
                 if cloud_array[rand_row_index][rand_col_index] == cloud_value: # Il pixel è nuvoloso
@@ -156,36 +155,41 @@ def cloud_check(rand_row_index, rand_col_index):
                 if cloud_array[rand_row_index][rand_col_index] == cloud_value: # Il pixel è nuvoloso
                     temp_cond = False
                     break
-        if not temp_cond: # Se temp_cond è False allora il pixel è nuvoloso
-            cloud_pixel = True # Il pixel è nuvoloso
+        if not temp_cond:  # Se temp_cond è False allora il pixel è nuvoloso
+            cloud_pixel = True  # Il pixel è nuvoloso
             break
     return cloud_pixel
 
 
-def mndwi_check(stack_dir_path, MNDWI_mean_value_list, num_band, rand_row_index, rand_col_index):
+def mndwi_check(stack_dir_path, MNDWI_mean_value_list, rand_row_index, rand_col_index):
     cond_mndwi = True
-    for stack in os.listdir(stack_dir_path): # Controllo solo sullo stack dell'anno dell'incendio
+    for stack in os.listdir(stack_dir_path):
         stack_dataset = rasterio.open(stack_dir_path + '/' + stack, 'r')
-        for i in range(0, num_band):
+        if 'LS8' in stack:
+            num_band = 7  # LS8
+        else:
+            num_band = 6  # LS5/LS7
+        for i in range(0, num_band):  # Controllare num_band
             if 'band2' in stack_dataset.descriptions[i]:
                 green_array = stack_dataset.read(i + 1, masked=True)
             if 'band5' in stack_dataset.descriptions[i]:
                 SWIR1_array = stack_dataset.read(i + 1, masked=True)
         MNDWI_array = (green_array - SWIR1_array)/(green_array + SWIR1_array)
         for MNDWI_mean in MNDWI_mean_value_list:
-            if abs(MNDWI_array[rand_row_index][rand_col_index] - MNDWI_mean) <= 0.10: # Provare anche con la seguente soglia: 0.05/0.07/0.09
+            if abs(MNDWI_array[rand_row_index][rand_col_index] - MNDWI_mean) <= 0.10:  # Provare anche con la seguente soglia: 0.05/0.07/0.09
                 cond_mndwi = False
-                return cond_mndwi, green_array
-    return cond_mndwi, green_array
+                print "Condizione sull'MNDWI non rispettata"
+                return cond_mndwi
+    return cond_mndwi
 
 
 # Bisogna capire se l'anno dello stack da cui estraggo i pixel è importante o meno
 def get_random_pixel(stack_dir_path, stack, lon_alto_sx, lat_alto_sx, lon_basso_dx, lat_basso_dx, altezza_cropped_array, larghezza_cropped_array, geojson_path, MNDWI_mean_value_list, num_band):
     # Prendo gli indici che fanno riferimento al pixel in alto a sinistra e in basso a destra
     stack_path = stack_dir_path + '/' + stack
-    stack_dataset = rasterio.open(stack_path, 'r') # Occhio a stack
-    row_00, col_00 = stack_dataset.index(lon_alto_sx,lat_alto_sx) # Punto in alto a sinistra
-    row_mn, col_mn = stack_dataset.index(lon_basso_dx,lat_basso_dx) # Punto di basso a destra
+    stack_dataset = rasterio.open(stack_path, 'r')  # Occhio a stack
+    row_00, col_00 = stack_dataset.index(lon_alto_sx, lat_alto_sx)  # Punto in alto a sinistra
+    row_mn, col_mn = stack_dataset.index(lon_basso_dx, lat_basso_dx)  # Punto di basso a destra
     stack_dataset.close()
     # A quanto pare devo castare gli indici
     row_00 = int(row_00)
@@ -199,62 +203,55 @@ def get_random_pixel(stack_dir_path, stack, lon_alto_sx, lat_alto_sx, lon_basso_
     #     num_extracted_pixel_threshold = altezza_cropped_array * larghezza_cropped_array
     # else:
     #     num_extracted_pixel_threshold = 30
-    num_extracted_pixel_threshold = 2 # Per i test
+    num_extracted_pixel_threshold = 2  # Per i test
     print 'Indici pixel in alto a sinistra della cornice proibita:', row_00 - min_dist, col_00 - min_dist
     print 'Indici pixel in alto a sinistra della cornice proibita:', row_mn + min_dist, col_mn + min_dist
     random_pixel_list = []
-    num_extracted_pixel = 0 # Numero di pixel estratti
+    num_extracted_pixel = 0  # Numero di pixel estratti
     while num_extracted_pixel < num_extracted_pixel_threshold:
         rand_row_index = randint(row_00 - max_dist, row_mn + max_dist)
         if rand_row_index < (row_00 - min_dist) or rand_row_index > (row_mn + min_dist):
             rand_col_index = randint(col_00 - max_dist, col_mn + max_dist)
         elif (row_00 - min_dist) <= rand_row_index <= (row_mn + min_dist):
-            num_fascia = randint(1,2) # 1 <= num_fascia <= 2
+            num_fascia = randint(1, 2)  # 1 <= num_fascia <= 2
             if num_fascia == 1:
                 rand_col_index = randint(col_00 - max_dist, col_00 - min_dist)
             else:
                 rand_col_index = randint(col_mn + min_dist, col_mn + max_dist)
-        random_pixel = {'riga' : rand_row_index,
-                          'colonna' : rand_col_index}
-        # Controllo se i 2 indici sono stati estratti, quindi se sto considerando un pixel già preso
+        random_pixel = {'riga': rand_row_index,
+                        'colonna': rand_col_index}
+        #  Controllo se i 2 indici sono stati estratti, quindi se sto considerando un pixel già preso
         if random_pixel in random_pixel_list:
             print 'Pixel estratto in precedenza', rand_row_index, rand_col_index
-            continue # Passo all'iterazione successiva
-        else: # Il pixel non è già stato estratto
-            # Effettuo ora il controllo sulle nuvole
-            if cloud_check(rand_row_index, rand_col_index): # Se la funzione restituisce True allora il pixel è nuvoloso
+            continue  # Passo all'iterazione successiva
+        else:  # Il pixel non è già stato estratto. Effettuo il controllo sulle nuvole
+            if cloud_check(rand_row_index, rand_col_index):  # Se la funzione restituisce True allora il pixel è nuvoloso
                 continue
             else:
-                # Effettuo il controllo sull'MNDWI
-                # cond_mndwi, green_array = mndwi_control(stack_dir_path, MNDWI_mean_value_list, num_band, rand_row_index, rand_col_index)
-                # if cond_mndwi is False: # Controllo condizione MNDWI
-                #     print 'Condizione su MNDWI non rispettata'
-                #     continue
-                # elif len(MNDWI_mean_value_list) > 15: # In questo caso sto usando dati LS7 (2004-2011 ci posso avere no data)
-                #     if green_array[rand_row_index][rand_col_index] == -9999: # -9999 valore nodata per LS7
-                #         print 'Il pixel corrisponde a no data'
-                #         continue
-                # Superata anche la condzione sull'MNDWI il pixel estratto può essere accettato
-                print 'Pixel estratto:', rand_row_index, rand_col_index
-                num_extracted_pixel += 1
-                random_pixel_list.append({'riga' : rand_row_index,
-                                          'colonna' : rand_col_index
-                                        })
+                # Il pixel non è nuvoloso. Effettuo allora il controllo sull'MNDWI
+                cond_mndwi = mndwi_check(stack_dir_path, MNDWI_mean_value_list, rand_row_index, rand_col_index)
+                if cond_mndwi is False:  # Controllo condizione MNDWI
+                    print 'Condizione su MNDWI non rispettata'
+                    continue
+                else:
+                    # Superata anche la condzione sull'MNDWI il pixel estratto può essere accettato
+                    print 'Pixel estratto:', random_pixel
+                    num_extracted_pixel += 1
+                    random_pixel_list.append(random_pixel)
     return random_pixel_list
 
 
 def get_bound_array(stack_path, random_pixel_list, SWIR2_band, num_band):
     green_array, red_array, NIR_array, SWIR1_array, SWIR2_array = get_band_array(stack_path, num_band, SWIR2_band)
-    green_array_bound = np.empty(len(random_pixel_list), dtype = green_array.dtype)
-    red_array_bound = np.empty(len(random_pixel_list), dtype = red_array.dtype)
-    NIR_array_bound = np.empty(len(random_pixel_list), dtype = NIR_array.dtype)
-    SWIR1_array_bound = np.empty(len(random_pixel_list), dtype = SWIR1_array.dtype)
-    SWIR2_array_bound = np.empty(len(random_pixel_list), dtype = SWIR2_array.dtype)
+    green_array_bound = np.empty(len(random_pixel_list), dtype=green_array.dtype)
+    red_array_bound = np.empty(len(random_pixel_list), dtype=red_array.dtype)
+    NIR_array_bound = np.empty(len(random_pixel_list), dtype=NIR_array.dtype)
+    SWIR1_array_bound = np.empty(len(random_pixel_list), dtype=SWIR1_array.dtype)
+    SWIR2_array_bound = np.empty(len(random_pixel_list), dtype=SWIR2_array.dtype)
     for i in range(0, len(random_pixel_list)):
-        pixel = random_pixel_list[i] # pixel = dict
+        pixel = random_pixel_list[i]  # pixel = dict
         pixel_row = pixel['riga']
         pixel_col = pixel['colonna']
-        print pixel_row, pixel_col
         print 'green_array[pixel_row][pixel_col]', green_array[pixel_row][pixel_col]
         green_array_bound[i] = green_array[pixel_row][pixel_col]
         print 'red_array[pixel_row][pixel_col]', red_array[pixel_row][pixel_col]
@@ -268,54 +265,54 @@ def get_bound_array(stack_path, random_pixel_list, SWIR2_band, num_band):
     return green_array_bound, red_array_bound, NIR_array_bound, SWIR1_array_bound, SWIR2_array_bound
 
 
+# Calcola la differenza assoluta fra SAVI_1999_polygon e SAVI_1999_contorno
 def calc_difference(sheet_list):
     for sheet in sheet_list:
-		for row in range(2, 8):
-			for col in range(1, 17):
-				polygon_item = xl_rowcol_to_cell(row, col)
-				intorno_item = xl_rowcol_to_cell(row, col + 17)
-				dest_cell = xl_rowcol_to_cell(row, col + 17)
-				formula = '=ABS(-' + polygon_item + '+' + intorno_item + ')' # Formula: intorno - poligono
-				esito = sheet.write_formula(dest_cell, formula)
+        for row in range(2, 8):
+            for col in range(1, 17):
+                polygon_item_cell = xl_rowcol_to_cell(row, col)
+                intorno_item_cell = xl_rowcol_to_cell(row, col + 17)
+                dest_cell = xl_rowcol_to_cell(row, col + 17 + 17)
+                formula = '=ABS(-' + polygon_item_cell + '+' + intorno_item_cell + ')'  # Formula: intorno - poligono
+                sheet.write_formula(dest_cell, formula)
 
 
-def core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, first_value_row_index, first_value_column_index, sheet_list, n):
-    polygon = get_polygon(geojson_path) # Estrae il poligono dal file geojson
+def core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, sheet_list):
+    polygon = get_polygon(geojson_path)  # Estrae il poligono dal file geojson
     MNDWI_mean_value_list = []
+    excel_column_index = 1
 
     # Con questo primo ciclo calcolo le statistiche relative all'AOI definita dal poligono
-    for stack in os.listdir(stack_dir_path):
-        xlsx_column = first_value_column_indexlon_basso_dx, lat_basso_dx
+    for stack in os.listdir(stack_dir_path):  # TODO: controllare l'ordine di lavorazione degli stack
         stack_year = stack[-8:-4]
         print 'stack_year:', stack_year
-        # Devo creare i nuovi stack dal 1999 al 2018 dalla cartella nell'HD esterno: L2_Monitoraggio_Stack_Annuali_1999-2018?
+        # TODO: creare gli stack dal 1999 al 2018
         if 'LS8' in stack:
-            SWIR2_band = 'band6' # LS8
+            SWIR2_band = 'band6'  # LS8
             num_band = 7
         else:
-            SWIR2_band = 'band7' # LS5/LS7
+            SWIR2_band = 'band7'  # LS5/LS7
             num_band = 6
+
         # cropped_dataset_path è lo stack ritagliato sul poligono
         cropped_dataset_path, altezza_cropped_array, larghezza_cropped_array = mask_dataset(stack_dir_path + '/' + stack, polygon, dest_stack_cropped_dir)
         green_cropped_array, red_cropped_array, NIR_cropped_array, SWIR1_cropped_array, SWIR2_cropped_array = get_band_array(cropped_dataset_path, num_band, SWIR2_band)
 
         # Serve per il famoso controllo che vedrò più avanti
         MNDWI_cropped_array = (green_cropped_array - SWIR1_cropped_array)/(green_cropped_array + SWIR1_cropped_array)
-        MNDWI_mean_value_listcropped_array_height.append(np.mean(MNDWI_cropped_array))
+        MNDWI_mean_value_list.append(np.mean(MNDWI_cropped_array))
 
-        geojson_name = os.path.basename(geojson_path)
-        geojson_name = geojson_name[:geojson_name.index(".")]
         # Calcolo le statistiche su polygon. La funzione scrive i risultati relativi a un singolo anno
-        calculate_stats(green_cropped_array, red_cropped_array, NIR_cropped_array, SWIR1_cropped_array, SWIR2_cropped_array, first_value_column_index, sheet_list)
-        first_value_column_index += 1
+        calculate_stats(green_cropped_array, red_cropped_array, NIR_cropped_array, SWIR1_cropped_array, SWIR2_cropped_array, excel_column_index, sheet_list)
+        excel_column_index += 1  # L'indice di colonna del file Excel si incrementa di anno in anno
 
     pixel_choice = False
     random_pixel_list = []
-    first_value_column_index += 1
+    excel_column_index += 2  # La distanza fra i vari blocchi del file excel deve essere di 1 casella vuota
 
     # Scelgo un array che fa riferimento al geojson per ottenere le coordinate del punto (0,0)
-    cropped_dataset = rasterio.open(cropped_dataset_path, 'r') # Mi serve l'oggetto dataset dello stack cropped
-    lon_alto_sx, lat_alto_sx = cropped_dataset.xy(0,0) # Viene restituita una tupla del tipo (lon_00, lat_00). Controllare la shape
+    cropped_dataset = rasterio.open(cropped_dataset_path, 'r')  # Mi serve l'oggetto dataset dello stack cropped
+    lon_alto_sx, lat_alto_sx = cropped_dataset.xy(0, 0)  # Viene restituita una tupla del tipo (lon_00, lat_00). Controllare la shape
     lon_basso_dx, lat_basso_dx = cropped_dataset.xy(altezza_cropped_array - 1, larghezza_cropped_array - 1)
     cropped_dataset.close()
 
@@ -324,20 +321,20 @@ def core_function(geojson_path, stack_dir_path, dest_stack_cropped_dir, first_va
         stack_year = stack[-8:-4]
         print stack_year
         if 'LS8' in stack:
-            SWIR2_band = 'band6' # LS8
+            SWIR2_band = 'band6'  # LS8
             num_band = 7
         else:
-            SWIR2_band = 'band7' # LS5/LS7
+            SWIR2_band = 'band7'  # LS5/LS7
             num_band = 6
         stack_path = stack_dir_path + '/' + stack
-        # Scelgo i pixel in maniera casuale solo alla prima iterazione del ciclo. Per ora non mi interessa l'anno da cui prendo i pixel random.
+        # Scelgo i pixel in maniera casuale solo alla prima iterazione del ciclo. L'anno da cui li prendo conta?
         if pixel_choice is False:
             print 'Scelgo i pixel random'
             random_pixel_list = get_random_pixel(stack_dir_path, stack, lon_alto_sx, lat_alto_sx, lon_basso_dx, lat_basso_dx, altezza_cropped_array, larghezza_cropped_array, geojson_path, MNDWI_mean_value_list, num_band)
             pixel_choice = True
         green_array_bound, red_array_bound, NIR_array_bound, SWIR1_array_bound, SWIR2_array_bound = get_bound_array(stack_path, random_pixel_list, SWIR2_band, num_band)
-        calculate_stats(green_array_bound, red_array_bound, NIR_array_bound, SWIR1_array_bound, SWIR2_array_bound, first_value_column_index, sheet_list)
-        first_value_column_index += 1
+        calculate_stats(green_array_bound, red_array_bound, NIR_array_bound, SWIR1_array_bound, SWIR2_array_bound, excel_column_index, sheet_list)
+        excel_column_index += 1
 
 
 
